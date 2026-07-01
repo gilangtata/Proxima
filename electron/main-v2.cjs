@@ -630,8 +630,8 @@ async function handleMCPRequest(request) {
                 return { success: true, provider };
 
             case 'newConversation':
-                await startNewConversation(provider);
-                return { success: true, provider };
+                const newConversationResult = await startNewConversation(provider);
+                return { success: true, provider, result: newConversationResult };
 
             case 'debugDOM':
                 // Debug: Inspect DOM structure to find correct selectors
@@ -2149,13 +2149,33 @@ function cleanPerplexityResponse(text) {
     return lines.join('\n').trim();
 }
 async function startNewConversation(provider) {
+    const resetAll = !provider || provider === 'all';
+    const providers = resetAll ? browserManager.getInitializedProviders() : [provider];
+    const results = {};
+
+    if (providers.length === 0) {
+        return results;
+    }
+
+    for (const providerName of providers) {
+        results[providerName] = await startNewConversationForProvider(providerName);
+    }
+
+    return results;
+}
+
+async function startNewConversationForProvider(provider) {
+    const result = { reset: false, navigated: false };
+
     // Reset API-level conversation state (clears stored conversation IDs in inject scripts)
     const webContents = browserManager.getWebContents(provider);
     if (webContents) {
         try {
             await providerAPI.resetConversation(provider, () => webContents);
+            result.reset = true;
         } catch (e) {
             console.error(`[startNewConversation] API reset failed for ${provider}:`, e.message);
+            result.error = e.message;
         }
     }
 
@@ -2163,7 +2183,10 @@ async function startNewConversation(provider) {
     const config = browserManager.providers[provider];
     if (config) {
         await browserManager.navigate(provider, config.url);
+        result.navigated = true;
     }
+
+    return result;
 }
 
 // Typing Detection for All Providers

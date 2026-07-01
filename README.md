@@ -483,6 +483,7 @@ GET  /ws                    — WebSocket documentation
 ### Functions
 
 The `"function"` field controls what happens. No function = normal chat.
+Add `"new_conversation": true` to any `/v1/chat/completions` request to reset the targeted provider before sending. To make every REST request start fresh, launch Proxima with `PROXIMA_FRESH_CHAT=1`.
 
 <table>
 <tr><th>Function</th><th>Body Fields</th><th>What it does</th></tr>
@@ -505,6 +506,18 @@ The `"function"` field controls what happens. No function = normal chat.
 curl http://localhost:3210/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model": "claude", "message": "What is AI?"}'
+```
+
+**Fresh Chat (no accumulated provider context):**
+```bash
+curl http://localhost:3210/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model": "claude", "message": "What is AI?", "new_conversation": true}'
+```
+
+**Reset Conversations Manually:**
+```bash
+curl -X POST http://localhost:3210/v1/conversations/new
 ```
 
 **Search:**
@@ -875,6 +888,20 @@ Proxima/
 
 **Windows Firewall prompt on first launch**
 <br>Proxima runs on `localhost:19223` and `localhost:3210`. Click Allow — it only accepts local connections.
+
+**Ubuntu: Electron aborts with `chrome-sandbox` permissions**
+<br>Fix the Electron sandbox helper once after `npm install`:
+
+```bash
+make fix-sandbox
+make start
+```
+
+If you are inside a container or restricted environment where setuid sandboxing is not allowed, use:
+
+```bash
+make start-no-sandbox
+```
 
 **Provider shows "Not logged in"**
 <br>Each provider has a different login method:

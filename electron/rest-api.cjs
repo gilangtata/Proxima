@@ -9,6 +9,7 @@ const { initWebSocket, getWSStats } = require('./ws-server.cjs');
 const REST_PORT = parseInt(process.env.PROXIMA_REST_PORT) || 3210;
 const VERSION = '4.1.0';
 const API_PREFIX = '/v1';
+const FRESH_CHAT_PER_REQUEST = /^(1|true|yes)$/i.test(process.env.PROXIMA_FRESH_CHAT || '');
 
 // ─── Model Aliases ───────────────────────────────────────
 
@@ -178,6 +179,26 @@ function resolveModels(modelField) {
         return { mode: 'single', providers: [resolved] };
     }
     return { mode: 'error', providers: [], error: `Model "${modelField}" not available. Enabled: ${enabled.join(', ')}` };
+}
+
+function shouldStartNewConversation(body) {
+    return FRESH_CHAT_PER_REQUEST ||
+        body.new_conversation === true ||
+        body.newConversation === true ||
+        body.fresh === true ||
+        body.fresh_chat === true ||
+        body.reset_context === true ||
+        body.resetContext === true;
+}
+
+async function startNewConversations(providers) {
+    const uniqueProviders = [...new Set((providers || []).filter(Boolean))];
+    for (const provider of uniqueProviders) {
+        const result = await handleMCPRequest({ action: 'newConversation', provider, data: {} });
+        if (!result || result.success === false) {
+            throw new Error(result?.error || `Failed to start new conversation for ${provider}`);
+        }
+    }
 }
 
 function pickBestProvider(preferred) {
@@ -509,6 +530,9 @@ POST /v1/chat/completions
 
 // Chat
 {"model": "claude", "message": "Hello"}
+
+// Fresh chat — resets provider context before sending
+{"model": "claude", "message": "Hello", "new_conversation": true}
 
 // Search — add "function": "search"
 {"model": "perplexity", "message": "AI news", "function": "search"}
@@ -1104,6 +1128,7 @@ async function handleRoute(method, pathname, body, res) {
         const fn = (body.function || '').toLowerCase().trim();
         const modelInput = body.model || 'auto';
         const resolved = resolveModels(modelInput);
+        const resetBeforeSend = shouldStartNewConversation(body);
 
         if (resolved.mode === 'error') {
             return sendError(res, 404, resolved.error, 'model_not_found');
@@ -1115,6 +1140,9 @@ async function handleRoute(method, pathname, body, res) {
             const r = resolveModels(input);
             if (r.mode === 'error') return sendError(res, 404, r.error);
             try {
+                if (resetBeforeSend) {
+                    await startNewConversations(r.providers);
+                }
                 if (r.mode === 'single') {
                     const result = await queryProvider(r.providers[0], prompt);
                     sendJSON(res, 200, { ...formatChatResponse(result, r.providers[0]), ...extraFields });
@@ -1229,7 +1257,11 @@ End with a security score (0-100).`;
             const stances = ['FOR / supportive', 'AGAINST / critical', 'NEUTRAL / analytical', 'ALTERNATIVE / unconventional'];
             const debateResults = {};
             const debateTimings = {};
-            await Promise.all(resolved2.providers.slice(0, sides).map(async (provider, i) => {
+            const debateProviders = resolved2.providers.slice(0, sides);
+            if (resetBeforeSend) {
+                await startNewConversations(debateProviders);
+            }
+            await Promise.all(debateProviders.map(async (provider, i) => {
                 try {
                     const stance = stances[i] || `Perspective ${i + 1}`;
                     const r = await queryProvider(provider, `You are debating this topic. Your position: ${stance}.\n\nTopic: ${topic}\n\nPresent your strongest arguments. Be persuasive. Do NOT present the other side.`);
@@ -1242,7 +1274,7 @@ End with a security score (0-100).`;
             sendJSON(res, 200, {
                 id: `proxima-${Date.now()}`, object: 'chat.completion', model: 'debate',
                 topic, perspectives: debateResults, timings: debateTimings,
-                proxima: { function: 'debate', providers: resolved2.providers.slice(0, sides) }
+                proxima: { function: 'debate', providers: debateProviders }
             });
             return;
         }
@@ -1254,11 +1286,17 @@ End with a security score (0-100).`;
         try {
             if (resolved.mode === 'single') {
                 const provider = resolved.providers[0];
+                if (resetBeforeSend) {
+                    await startNewConversations([provider]);
+                }
                 const result = body.file
                     ? await queryProviderWithFile(provider, message, body.file)
                     : await queryProvider(provider, message);
                 sendJSON(res, 200, formatChatResponse(result, provider));
             } else {
+                if (resetBeforeSend) {
+                    await startNewConversations(resolved.providers);
+                }
                 const multiResults = await queryMultiple(resolved.providers, message);
                 sendJSON(res, 200, formatAllResponse(multiResults));
             }
@@ -1300,7 +1338,8 @@ End with a security score (0-100).`;
                 chat: {
                     description: 'Normal chat (default when no function specified)',
                     body: { model: 'string', message: 'string' },
-                    example: { model: 'claude', message: 'Hello' }
+                    optional: { new_conversation: 'boolean; reset provider context before sending' },
+                    example: { model: 'claude', message: 'Hello', new_conversation: true }
                 },
                 search: {
                     description: 'Web search with AI analysis',
@@ -1360,8 +1399,16 @@ End with a security score (0-100).`;
 
     if (method === 'POST' && pathname === `${API_PREFIX}/conversations/new`) {
         try {
-            const result = await handleMCPRequest({ action: 'newConversation', provider: 'all', data: {} });
-            sendJSON(res, 200, { success: true, message: 'New conversations started', result });
+            const resolvedReset = resolveModels(body.model || 'all');
+            if (resolvedReset.mode === 'error') {
+                return sendError(res, 404, resolvedReset.error, 'model_not_found');
+            }
+            await startNewConversations(resolvedReset.providers);
+            sendJSON(res, 200, {
+                success: true,
+                message: 'New conversations started',
+                providers: resolvedReset.providers
+            });
         } catch (e) { sendError(res, 500, e.message); }
         return;
     }
