@@ -2660,30 +2660,75 @@ ipcMain.handle('get-rest-api-enabled', () => {
     return { success: true, enabled: !!settings.restApiEnabled, running: isRestAPIRunning() };
 });
 
+function getCliSourcePath() {
+    const asarPath = path.join(app.getAppPath() + '.unpacked', 'cli', 'proxima-cli.cjs');
+    const devPath = path.join(app.getAppPath(), 'cli', 'proxima-cli.cjs');
+    return fs.existsSync(asarPath) ? asarPath : devPath;
+}
+
+function getCliBinDirs() {
+    const userDataBinDir = path.join(app.getPath('userData'), 'bin');
+    if (process.platform === 'win32') {
+        return [userDataBinDir];
+    }
+
+    const dirs = [];
+    if (process.platform === 'linux') {
+        dirs.push(path.join(app.getPath('home'), '.local', 'bin'));
+    }
+    dirs.push(userDataBinDir);
+    return [...new Set(dirs)];
+}
+
+function shellQuote(value) {
+    return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
+function isDirOnPath(dir) {
+    return (process.env.PATH || '')
+        .split(path.delimiter)
+        .filter(Boolean)
+        .some(entry => path.resolve(entry) === path.resolve(dir));
+}
+
 ipcMain.handle('install-cli', async () => {
     try {
-        const { exec } = require('child_process');
+        const cliSource = getCliSourcePath();
+        if (!fs.existsSync(cliSource)) {
+            return { success: false, error: `CLI source not found: ${cliSource}` };
+        }
 
-        // CLI path: works in both dev (npm start) and installed (.exe) mode
-        const asarPath = path.join(app.getAppPath() + '.unpacked', 'cli', 'proxima-cli.cjs');
-        const devPath = path.join(app.getAppPath(), 'cli', 'proxima-cli.cjs');
-        const cliSource = fs.existsSync(asarPath) ? asarPath : devPath;
-
-        // Bin directory in user's AppData
-        const binDir = path.join(app.getPath('userData'), 'bin');
+        const binDir = getCliBinDirs()[0];
         fs.mkdirSync(binDir, { recursive: true });
 
-        // Create proxima.cmd wrapper
-        fs.writeFileSync(path.join(binDir, 'proxima.cmd'), `@echo off\r\nnode "${cliSource}" %*`);
+        if (process.platform === 'win32') {
+            const { exec } = require('child_process');
+            fs.writeFileSync(path.join(binDir, 'proxima.cmd'), `@echo off\r\nnode "${cliSource}" %*\r\n`);
 
-        // Add to user PATH via PowerShell
-        const escaped = binDir.replace(/\\/g, '\\\\');
-        const ps = `$p=[Environment]::GetEnvironmentVariable('Path','User');if($p -notlike '*${escaped}*'){[Environment]::SetEnvironmentVariable('Path',$p+';${escaped}','User')}`;
-        await new Promise((resolve) => {
-            exec(`powershell -NoProfile -Command "${ps}"`, { windowsHide: true }, () => resolve());
-        });
+            const escaped = binDir.replace(/\\/g, '\\\\');
+            const ps = `$p=[Environment]::GetEnvironmentVariable('Path','User');if($p -notlike '*${escaped}*'){[Environment]::SetEnvironmentVariable('Path',$p+';${escaped}','User')}`;
+            await new Promise((resolve) => {
+                exec(`powershell -NoProfile -Command "${ps}"`, { windowsHide: true }, () => resolve());
+            });
 
-        return { success: true, path: binDir };
+            return {
+                success: true,
+                path: binDir,
+                message: 'Done! Open a new CMD or PowerShell and type "proxima".'
+            };
+        }
+
+        const wrapperPath = path.join(binDir, 'proxima');
+        fs.writeFileSync(wrapperPath, `#!/bin/sh\nexec node ${shellQuote(cliSource)} "$@"\n`);
+        fs.chmodSync(wrapperPath, 0o755);
+
+        return {
+            success: true,
+            path: binDir,
+            message: isDirOnPath(binDir)
+                ? 'Done! Open a new terminal and type "proxima".'
+                : `Installed to ${binDir}. Add this directory to PATH, then open a new terminal.`
+        };
     } catch (err) {
         console.error('[CLI Install]', err.message);
         return { success: false, error: err.message };
@@ -2691,26 +2736,28 @@ ipcMain.handle('install-cli', async () => {
 });
 
 ipcMain.handle('is-cli-installed', () => {
-    const binDir = path.join(app.getPath('userData'), 'bin');
-    const cmdPath = path.join(binDir, 'proxima.cmd');
-    return fs.existsSync(cmdPath);
+    const fileName = process.platform === 'win32' ? 'proxima.cmd' : 'proxima';
+    return getCliBinDirs().some(binDir => fs.existsSync(path.join(binDir, fileName)));
 });
 
 ipcMain.handle('uninstall-cli', async () => {
     try {
-        const { exec } = require('child_process');
-        const binDir = path.join(app.getPath('userData'), 'bin');
-        const cmdPath = path.join(binDir, 'proxima.cmd');
+        const fileName = process.platform === 'win32' ? 'proxima.cmd' : 'proxima';
 
-        // Delete proxima.cmd
-        if (fs.existsSync(cmdPath)) fs.unlinkSync(cmdPath);
+        for (const binDir of getCliBinDirs()) {
+            const cliPath = path.join(binDir, fileName);
+            if (fs.existsSync(cliPath)) fs.unlinkSync(cliPath);
+        }
 
-        // Remove from user PATH via PowerShell
-        const escaped = binDir.replace(/\\/g, '\\\\');
-        const ps = `$p=[Environment]::GetEnvironmentVariable('Path','User');$p=($p -split ';'|Where-Object{$_ -ne '${escaped}'})-join';';[Environment]::SetEnvironmentVariable('Path',$p,'User')`;
-        await new Promise((resolve) => {
-            exec(`powershell -NoProfile -Command "${ps}"`, { windowsHide: true }, () => resolve());
-        });
+        if (process.platform === 'win32') {
+            const { exec } = require('child_process');
+            const binDir = getCliBinDirs()[0];
+            const escaped = binDir.replace(/\\/g, '\\\\');
+            const ps = `$p=[Environment]::GetEnvironmentVariable('Path','User');$p=($p -split ';'|Where-Object{$_ -ne '${escaped}'})-join';';[Environment]::SetEnvironmentVariable('Path',$p,'User')`;
+            await new Promise((resolve) => {
+                exec(`powershell -NoProfile -Command "${ps}"`, { windowsHide: true }, () => resolve());
+            });
+        }
 
         return { success: true };
     } catch (err) {

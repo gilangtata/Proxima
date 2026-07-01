@@ -126,22 +126,67 @@ class IPCClient {
 
 // ─── Provider Config ────────────────────────────────
 
+function getUserDataFileCandidates(fileName) {
+    const candidates = [];
+    const appDirNames = ['proxima', 'Proxima'];
+
+    function add(candidatePath) {
+        if (candidatePath && !candidates.includes(candidatePath)) {
+            candidates.push(candidatePath);
+        }
+    }
+
+    if (process.env.PROXIMA_USER_DATA_DIR) {
+        add(path.join(process.env.PROXIMA_USER_DATA_DIR, fileName));
+    }
+
+    if (process.platform === 'win32') {
+        const bases = [
+            process.env.APPDATA,
+            process.env.USERPROFILE ? path.join(process.env.USERPROFILE, 'AppData', 'Roaming') : null
+        ];
+        for (const base of bases) {
+            for (const dirName of appDirNames) {
+                add(base ? path.join(base, dirName, fileName) : null);
+            }
+        }
+    } else if (process.platform === 'darwin') {
+        const base = process.env.HOME
+            ? path.join(process.env.HOME, 'Library', 'Application Support')
+            : null;
+        for (const dirName of appDirNames) {
+            add(base ? path.join(base, dirName, fileName) : null);
+        }
+    } else {
+        const bases = [
+            process.env.XDG_CONFIG_HOME,
+            process.env.HOME ? path.join(process.env.HOME, '.config') : null
+        ];
+        for (const base of bases) {
+            for (const dirName of appDirNames) {
+                add(base ? path.join(base, dirName, fileName) : null);
+            }
+        }
+    }
+
+    return candidates;
+}
+
+function readUserDataJson(fileName) {
+    for (const candidatePath of getUserDataFileCandidates(fileName)) {
+        if (fs.existsSync(candidatePath)) {
+            return JSON.parse(fs.readFileSync(candidatePath, 'utf8'));
+        }
+    }
+    return null;
+}
+
 function getEnabledProviders() {
     try {
-        // Primary: Read from Electron's user data folder (always in sync with app settings)
-        // Must match Electron's app.getPath('userData') for each platform
-        let appDataPath;
-        if (process.platform === 'win32') {
-            appDataPath = path.join(process.env.APPDATA || '', 'proxima', 'enabled-providers.json');
-        } else if (process.platform === 'darwin') {
-            appDataPath = path.join(process.env.HOME || '', 'Library', 'Application Support', 'proxima', 'enabled-providers.json');
-        } else {
-            appDataPath = path.join(process.env.HOME || '', '.config', 'proxima', 'enabled-providers.json');
-        }
-
-        // AppData is most reliable — Electron always writes here
-        if (fs.existsSync(appDataPath)) {
-            const data = JSON.parse(fs.readFileSync(appDataPath, 'utf8'));
+        // Primary: read from Electron's user data folder, with Linux/macOS
+        // case variants because packaged app names can differ from dev mode.
+        const data = readUserDataJson('enabled-providers.json');
+        if (data) {
             return new Set(data.enabled || []);
         }
 
@@ -166,18 +211,8 @@ function isProviderEnabled(provider) {
 
 function getFileReferenceEnabled() {
     try {
-    
-        let settingsPath;
-        if (process.platform === 'win32') {
-            settingsPath = path.join(process.env.APPDATA || '', 'proxima', 'settings.json');
-        } else if (process.platform === 'darwin') {
-            settingsPath = path.join(process.env.HOME || '', 'Library', 'Application Support', 'proxima', 'settings.json');
-        } else {
-            settingsPath = path.join(process.env.HOME || '', '.config', 'proxima', 'settings.json');
-        }
-
-        if (fs.existsSync(settingsPath)) {
-            const data = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+        const data = readUserDataJson('settings.json');
+        if (data) {
             return data.fileReferenceEnabled !== false;
         }
     } catch (e) {

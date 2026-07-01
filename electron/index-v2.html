@@ -1534,7 +1534,7 @@ ws.onmessage = (e) => console.log(JSON.parse(e.data));</code>
                 const installed = await agentHub.isCliInstalled();
                 if (installed) {
                     setCliInstalledUI();
-                    document.getElementById('cli-install-status').textContent = '✅ CLI is active. Use "proxima" from any terminal.';
+                    document.getElementById('cli-install-status').textContent = 'CLI is active. Use "proxima" from any terminal.';
                 }
             } catch (e) { }
         }
@@ -1549,7 +1549,7 @@ ws.onmessage = (e) => console.log(JSON.parse(e.data));</code>
                 const result = await agentHub.installCli();
                 if (result.success) {
                     setCliInstalledUI();
-                    status.textContent = '✅ Done! Open a new CMD or PowerShell and type "proxima".';
+                    status.textContent = result.message || 'Done! Open a new terminal and type "proxima".';
                     showToast('CLI installed — open a new terminal to use it');
                 } else {
                     status.style.display = 'block';

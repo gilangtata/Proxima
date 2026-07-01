@@ -201,6 +201,7 @@ Proxima is a local AI gateway that connects multiple AI providers to your develo
 - [Node.js 18+](https://nodejs.org/) (for MCP server and CLI)
 - **Windows 10/11** — pre-built installer available
 - **macOS / Linux** — supported via source code
+- **Ubuntu** — install the Electron desktop libraries listed below
 
 <br>
 
@@ -224,6 +225,11 @@ Download the latest release and run the installer.
 **Run from Source (Windows / macOS / Linux)**
 
 ```bash
+# Ubuntu only: Electron runtime libraries
+sudo apt update
+sudo apt install -y libnss3 libatk-bridge2.0-0 libgtk-3-0 libgbm1 libxss1
+sudo apt install -y libasound2 || sudo apt install -y libasound2t64
+
 git clone https://github.com/Zen4-bit/Proxima.git
 cd Proxima
 npm install
@@ -240,7 +246,14 @@ npm start
 
 **CLI install:**
 - **Windows:** Settings → **⚡ Install CLI to PATH**, or `npm link`
-- **macOS / Linux:** `npm link` (may need `sudo npm link`)
+- **Ubuntu / Linux:** Settings → **⚡ Install CLI to PATH** creates `~/.local/bin/proxima`, or use `npm link`
+- **macOS:** `npm link` (may need `sudo npm link`)
+
+**Build on Ubuntu/Linux:**
+
+```bash
+npm run build:linux
+```
 
 <br>
 
@@ -255,7 +268,7 @@ npm start
   "mcpServers": {
     "proxima": {
       "command": "node",
-      "args": ["C:/path/to/Proxima/src/mcp-server-v3.js"]
+      "args": ["/home/you/Proxima/src/mcp-server-v3.js"]
     }
   }
 }

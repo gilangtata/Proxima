@@ -23,7 +23,10 @@
         "start": "electron .",
         "mcp": "node src/mcp-server-v3.js",
         "cli": "node cli/proxima-cli.cjs",
-        "build": "electron-builder --win --x64",
+        "build": "electron-builder",
+        "build:win": "electron-builder --win --x64",
+        "build:linux": "electron-builder --linux AppImage --x64",
+        "build:ubuntu": "npm run build:linux",
         "build:installer": "electron-builder --win --x64 -c.win.target=nsis"
     },
     "build": {
@@ -65,6 +68,19 @@
             "createDesktopShortcut": true,
             "createStartMenuShortcut": true,
             "shortcutName": "Proxima"
+        },
+        "linux": {
+            "target": [
+                {
+                    "target": "AppImage",
+                    "arch": [
+                        "x64"
+                    ]
+                }
+            ],
+            "category": "Development",
+            "icon": "assets/proxima-icon.png",
+            "artifactName": "${productName}-${version}-${arch}.${ext}"
         }
     },
     "dependencies": {

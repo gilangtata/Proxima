@@ -821,12 +821,12 @@ proxima code debug "function fails on empty array"</pre>
                 </div>
                 <div class="ex">
                     <h4>Environment Variables</h4>
-                    <pre># Custom port
-set PROXIMA_PORT=4000
+                    <pre># macOS / Linux
+export PROXIMA_PORT=4000
 proxima ask claude "Hello"
 
-# Custom host
-set PROXIMA_HOST=192.168.1.100
+# Windows PowerShell
+$env:PROXIMA_HOST="192.168.1.100"
 proxima status
 
 # Default: 127.0.0.1:${REST_PORT}</pre>
